@@ -1,0 +1,55 @@
+name: Formula
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: formula-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check for a published formula
+        id: formula
+        run: |
+          if [ -f Formula/figfig.rb ]; then
+            ruby -c Formula/figfig.rb
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No published release yet. Add the verified release's Formula/figfig.rb to enable installation checks."
+          fi
+      - uses: Homebrew/actions/setup-homebrew@main
+        if: steps.formula.outputs.present == 'true'
+      - name: Register this checkout as the tap
+        if: steps.formula.outputs.present == 'true'
+        run: brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
+      - name: Check formula style and metadata
+        if: steps.formula.outputs.present == 'true'
+        run: |
+          brew style trancore/tap/figfig
+          brew audit --strict trancore/tap/figfig
+      - name: Build and test the source release
+        if: steps.formula.outputs.present == 'true'
+        run: |
+          brew install --build-from-source trancore/tap/figfig
+          brew test trancore/tap/figfig
+      - name: Check uninstallation
+        if: always() && steps.formula.outputs.present == 'true'
+        run: |
+          if brew list --formula figfig >/dev/null 2>&1; then
+            brew uninstall --force trancore/tap/figfig
+          fi
