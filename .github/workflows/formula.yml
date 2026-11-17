@@ -32,7 +32,7 @@ jobs:
           else
             echo "::notice::No published release yet. Add the verified release's Formula/figfig.rb to enable installation checks."
           fi
-      - uses: Homebrew/actions/setup-homebrew@master
+      - uses: Homebrew/actions/setup-homebrew@main
         if: steps.formula.outputs.present == 'true'
       - name: Register this checkout as the tap
         if: steps.formula.outputs.present == 'true'
