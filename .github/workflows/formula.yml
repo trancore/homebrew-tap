@@ -36,7 +36,9 @@ jobs:
         if: steps.formula.outputs.present == 'true'
       - name: Register this checkout as the tap
         if: steps.formula.outputs.present == 'true'
-        run: brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
+        run: |
+          brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
+          brew trust --formula trancore/tap/figfig
       - name: Check formula style and metadata
         if: steps.formula.outputs.present == 'true'
         run: |
