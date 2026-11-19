@@ -1,14 +1,14 @@
-name: chack homebrew
+name: chack homebrew figfig
 on:
   push:
     branches: [main]
     paths:
-      - 'Formula/**'
-      - '.github/workflows/check-homebrew-figfig.yml'
+      - "Formula/**"
+      - ".github/workflows/check-homebrew-figfig.yml"
   pull_request:
     paths:
-      - 'Formula/**'
-      - '.github/workflows/check-homebrew-figfig.yml'
+      - "Formula/**"
+      - ".github/workflows/check-homebrew-figfig.yml"
   workflow_dispatch:
 permissions:
   contents: read
