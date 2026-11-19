@@ -6,10 +6,6 @@
 
 ## 配布パッケージ
 
-- [`figfig` のFormula](./Formula/figfig.rb) · [導入・更新・削除の手順](https://github.com/trancore/figfig/blob/main/docs/getting-started/installation.md)
-
-## メンテナー向け
-
-Releaseの公開後に、本体リポジトリの `Update Homebrew tap` ワークフローがFormulaを検証・更新します。tapのCIはApple SiliconとIntelのMacでFormulaを検証します。
+- [figfig](https://github.com/trancore/figfig)
 
 [MIT License](./LICENSE)
