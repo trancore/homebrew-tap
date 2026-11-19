@@ -1,8 +1,14 @@
-name: Formula
+name: chack homebrew
 on:
   push:
     branches: [main]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/check-homebrew-figfig.yml'
   pull_request:
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/check-homebrew-figfig.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,13 +20,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-15-intel]
+        os: [xcode-27, macos-26-intel]
     runs-on: ${{ matrix.os }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Check for a published formula
@@ -32,7 +38,7 @@ jobs:
           else
             echo "::notice::No published release yet. Add the verified release's Formula/figfig.rb to enable installation checks."
           fi
-      - uses: Homebrew/actions/setup-homebrew@main
+      - uses: Homebrew/actions/setup-homebrew@2026.11.14.1
         if: steps.formula.outputs.present == 'true'
       - name: Register this checkout as the tap
         if: steps.formula.outputs.present == 'true'
