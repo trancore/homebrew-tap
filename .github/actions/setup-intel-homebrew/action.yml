@@ -39,6 +39,12 @@ runs:
         brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
         brew trust --formula trancore/tap/figfig
 
+        # Avoid scanning or removing unrelated packages preinstalled on the runner.
+        {
+          printf 'HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1\n'
+          printf 'HOMEBREW_NO_AUTOREMOVE=1\n'
+        } >> "$GITHUB_ENV"
+
         platform=$(printf '%s\n' "$(sw_vers -buildVersion)" "$(xcodebuild -version)" "${ImageVersion:-}" |
           shasum -a 256 | cut -d ' ' -f 1)
         dependencies=$(brew deps --include-build --full-name trancore/tap/figfig |
