@@ -27,11 +27,14 @@ runs:
         core_repo="$brew_repo/Library/Taps/homebrew/homebrew-core"
         brew_tag_ref="refs/tags/$BREW_TAG"
         git -C "$brew_repo" fetch --no-tags --depth=1 https://github.com/Homebrew/brew.git "$brew_tag_ref:$brew_tag_ref"
-        git -C "$brew_repo" checkout --quiet --detach "$brew_tag_ref"
-        git init --quiet -b main "$core_repo"
+        git -C "$brew_repo" checkout --quiet --force --detach "$brew_tag_ref"
+        if [[ ! -d "$core_repo/.git" ]]; then
+          git init --quiet -b main "$core_repo"
+        fi
         git -C "$core_repo" config remote.origin.url https://github.com/Homebrew/homebrew-core.git
         git -C "$core_repo" fetch --no-tags --depth=1 origin "$CORE_REVISION"
-        git -C "$core_repo" checkout --quiet --detach FETCH_HEAD
+        # Hosted runner images can contain local edits to their preinstalled core checkout.
+        git -C "$core_repo" checkout --quiet --force --detach FETCH_HEAD
 
         brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
         brew trust --formula trancore/tap/figfig
