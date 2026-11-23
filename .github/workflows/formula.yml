@@ -81,6 +81,8 @@ jobs:
           if brew list --versions "$BOTTLE_FORMULA" >/dev/null; then
             brew uninstall --force --ignore-dependencies "$BOTTLE_FORMULA"
           fi
+          # Bottle mode requires bottles for any dependencies that are still missing.
+          brew install --only-dependencies --build-from-source "$BOTTLE_FORMULA"
           brew install --build-bottle "$BOTTLE_FORMULA"
           brew bottle --skip-relocation --no-rebuild "$BOTTLE_FORMULA"
           compgen -G './*.bottle.tar.gz' >/dev/null
