@@ -1,0 +1,169 @@
+name: Prepare Intel Homebrew dependencies
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 1,4"
+  push:
+    branches: [main]
+    paths:
+      - "Formula/**"
+      - ".github/actions/setup-intel-homebrew/**"
+      - ".github/workflows/formula.yml"
+permissions:
+  contents: read
+concurrency:
+  group: prepare-intel-homebrew-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_INSTALL_FROM_API: "1"
+  HOMEBREW_NO_ASK: "1"
+jobs:
+  check-cache:
+    runs-on: macos-26-intel
+    timeout-minutes: 25
+    outputs:
+      build: ${{ steps.formula.outputs.present == 'true' && steps.dependencies.outputs.cache-hit != 'true' }}
+    steps:
+      - &checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check for a published formula
+        id: formula
+        run: |
+          if [[ -f Formula/figfig.rb ]]; then
+            ruby -c Formula/figfig.rb
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up pinned Homebrew
+        id: homebrew
+        if: steps.formula.outputs.present == 'true'
+        uses: ./.github/actions/setup-intel-homebrew
+      - name: Refresh the dependency cache if present
+        id: dependencies
+        if: steps.formula.outputs.present == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.dependencies-key }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+
+  llvm:
+    needs: check-cache
+    if: needs.check-cache.outputs.build == 'true'
+    runs-on: macos-26-intel
+    timeout-minutes: 350
+    env:
+      BOTTLE_FORMULA: llvm
+    steps:
+      - *checkout
+      - &setup
+        name: Set up pinned Homebrew
+        id: homebrew
+        uses: ./.github/actions/setup-intel-homebrew
+      - &restore_bottle
+        name: Restore the stage's bottle
+        id: bottle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-${{ env.BOTTLE_FORMULA }}
+          path: ${{ runner.temp }}/${{ env.BOTTLE_FORMULA }}-bottle
+      - &build_bottle
+        name: Build a local bottle
+        if: steps.bottle.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bottle_dir="$RUNNER_TEMP/$BOTTLE_FORMULA-bottle"
+          mkdir -p "$bottle_dir"
+          cd "$bottle_dir"
+          if brew list --versions "$BOTTLE_FORMULA" >/dev/null; then
+            brew uninstall --force --ignore-dependencies "$BOTTLE_FORMULA"
+          fi
+          brew install --build-bottle "$BOTTLE_FORMULA"
+          brew bottle --skip-relocation --no-rebuild "$BOTTLE_FORMULA"
+          compgen -G './*.bottle.tar.gz' >/dev/null
+      - &save_bottle
+        name: Save the stage's bottle
+        if: steps.bottle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-${{ env.BOTTLE_FORMULA }}
+          path: ${{ runner.temp }}/${{ env.BOTTLE_FORMULA }}-bottle
+
+  rust:
+    needs: llvm
+    runs-on: macos-26-intel
+    timeout-minutes: 350
+    env:
+      BOTTLE_FORMULA: rust
+    steps:
+      - *checkout
+      - *setup
+      - *restore_bottle
+      - &restore_llvm
+        name: Restore the LLVM bottle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-llvm
+          path: ${{ runner.temp }}/llvm-bottle
+          fail-on-cache-miss: true
+      - &install_llvm
+        name: Install the LLVM bottle
+        run: brew install "$RUNNER_TEMP"/llvm-bottle/*.bottle.tar.gz
+      - *build_bottle
+      - *save_bottle
+
+  node:
+    needs: rust
+    runs-on: macos-26-intel
+    timeout-minutes: 350
+    env:
+      BOTTLE_FORMULA: node
+    steps:
+      - *checkout
+      - *setup
+      - *restore_bottle
+      - *restore_llvm
+      - &restore_rust
+        name: Restore the Rust bottle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-rust
+          path: ${{ runner.temp }}/rust-bottle
+          fail-on-cache-miss: true
+      - *install_llvm
+      - &install_rust
+        name: Install the Rust bottle
+        run: brew install "$RUNNER_TEMP"/rust-bottle/*.bottle.tar.gz
+      - *build_bottle
+      - *save_bottle
+
+  save-dependencies:
+    needs: node
+    runs-on: macos-26-intel
+    timeout-minutes: 350
+    steps:
+      - *checkout
+      - *setup
+      - *restore_llvm
+      - *restore_rust
+      - name: Restore the Node.js bottle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-node
+          path: ${{ runner.temp }}/node-bottle
+          fail-on-cache-miss: true
+      - *install_llvm
+      - *install_rust
+      - name: Install the complete build dependency set
+        run: |
+          brew install "$RUNNER_TEMP"/node-bottle/*.bottle.tar.gz
+          brew install --only-dependencies --build-from-source trancore/tap/figfig
+          bash .github/actions/setup-intel-homebrew/check-dependencies.sh
+      - name: Save the installed dependencies
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.dependencies-key }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}

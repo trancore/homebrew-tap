@@ -1,0 +1,52 @@
+name: Set up Intel Homebrew
+description: Pin Homebrew and identify the cached build dependencies for figfig.
+outputs:
+  platform-key:
+    description: Cache key prefix for bottles built on this Intel runner.
+    value: ${{ steps.setup.outputs.platform-key }}
+  dependencies-key:
+    description: Cache key for the complete installed dependency set.
+    value: ${{ steps.setup.outputs.dependencies-key }}
+  dependencies-paths:
+    description: Homebrew installation paths containing kegs, receipts, links and configuration.
+    value: ${{ steps.setup.outputs.dependencies-paths }}
+runs:
+  using: composite
+  steps:
+    - id: setup
+      shell: bash
+      env:
+        BREW_TAG: 7.0.15
+        CORE_REVISION: 5fe576b7ca6f8d53ec86e76660dfd0a502dfbc19
+      run: |
+        set -euo pipefail
+
+        test "$(uname -m)" = x86_64
+        test "$(brew --prefix)" = /usr/local
+        brew_repo=$(brew --repository)
+        core_repo="$brew_repo/Library/Taps/homebrew/homebrew-core"
+        brew_tag_ref="refs/tags/$BREW_TAG"
+        git -C "$brew_repo" fetch --no-tags --depth=1 https://github.com/Homebrew/brew.git "$brew_tag_ref:$brew_tag_ref"
+        git -C "$brew_repo" checkout --quiet --detach "$brew_tag_ref"
+        git init --quiet -b main "$core_repo"
+        git -C "$core_repo" config remote.origin.url https://github.com/Homebrew/homebrew-core.git
+        git -C "$core_repo" fetch --no-tags --depth=1 origin "$CORE_REVISION"
+        git -C "$core_repo" checkout --quiet --detach FETCH_HEAD
+
+        brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
+        brew trust --formula trancore/tap/figfig
+
+        platform=$(printf '%s\n' "$(sw_vers -buildVersion)" "$(xcodebuild -version)" "${ImageVersion:-}" |
+          shasum -a 256 | cut -d ' ' -f 1)
+        dependencies=$(brew deps --include-build --full-name trancore/tap/figfig |
+          LC_ALL=C sort -u | shasum -a 256 | cut -d ' ' -f 1)
+        platform_key="figfig-homebrew-v1-intel-$BREW_TAG-$CORE_REVISION-$platform"
+
+        {
+          printf 'platform-key=%s\n' "$platform_key"
+          printf 'dependencies-key=%s-deps-%s\n' "$platform_key" "$dependencies"
+          # Keep the Homebrew checkout, taps, downloads, and GitHub workspace out of the cache.
+          printf 'dependencies-paths<<PATHS\n'
+          printf '/usr/local/%s\n' Cellar opt bin sbin lib include share etc var/homebrew/linked
+          printf 'PATHS\n'
+        } >> "$GITHUB_OUTPUT"

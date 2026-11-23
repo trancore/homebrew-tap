@@ -4,11 +4,15 @@ on:
     branches: [main]
     paths:
       - "Formula/**"
+      - ".github/actions/setup-intel-homebrew/**"
       - ".github/workflows/check-homebrew-figfig.yml"
+      - ".github/workflows/formula.yml"
   pull_request:
     paths:
       - "Formula/**"
+      - ".github/actions/setup-intel-homebrew/**"
       - ".github/workflows/check-homebrew-figfig.yml"
+      - ".github/workflows/formula.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,19 +21,18 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [xcode-27, macos-26-intel]
-    runs-on: ${{ matrix.os }}
+    name: verify (xcode-27)
+    runs-on: xcode-27
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
-      - uses: actions/checkout@v7.0.1
+      - &checkout
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Check for a published formula
+      - &check_formula
+        name: Check for a published formula
         id: formula
         run: |
           if [ -f Formula/figfig.rb ]; then
@@ -45,19 +48,62 @@ jobs:
         run: |
           brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
           brew trust --formula trancore/tap/figfig
-      - name: Check formula style and metadata
+      - &audit_formula
+        name: Check formula style and metadata
         if: steps.formula.outputs.present == 'true'
         run: |
           brew style trancore/tap/figfig
           brew audit --strict trancore/tap/figfig
-      - name: Build and test the source release
+      - &test_formula
+        name: Build and test the source release
         if: steps.formula.outputs.present == 'true'
         run: |
           brew install --build-from-source trancore/tap/figfig
           brew test trancore/tap/figfig
-      - name: Check uninstallation
+      - &check_uninstall
+        name: Check uninstallation
         if: always() && steps.formula.outputs.present == 'true'
         run: |
           if brew list --formula figfig >/dev/null 2>&1; then
             brew uninstall --force trancore/tap/figfig
+            ! brew list --versions figfig >/dev/null 2>&1
           fi
+
+  verify-intel:
+    name: verify (macos-26-intel)
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    cache-mode: read
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_INSTALL_FROM_API: "1"
+      HOMEBREW_NO_ASK: "1"
+    steps:
+      - *checkout
+      - *check_formula
+      - name: Set up pinned Homebrew
+        id: homebrew
+        if: steps.formula.outputs.present == 'true'
+        uses: ./.github/actions/setup-intel-homebrew
+      - name: Restore the prepared build dependencies
+        id: dependencies
+        if: steps.formula.outputs.present == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.homebrew.outputs.dependencies-key }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+      - name: Require a complete dependency cache
+        if: steps.formula.outputs.present == 'true'
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
+        run: |
+          if [[ "$CACHE_HIT" != true ]]; then
+            echo '::error::Intel dependencies are unavailable. Run Prepare Intel Homebrew dependencies (formula.yml) on this branch or main, then rerun the check.'
+            exit 1
+          fi
+          bash .github/actions/setup-intel-homebrew/check-dependencies.sh
+      - *audit_formula
+      - *test_formula
+      - *check_uninstall
