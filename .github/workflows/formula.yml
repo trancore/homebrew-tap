@@ -78,6 +78,8 @@ jobs:
           bottle_dir="$RUNNER_TEMP/$BOTTLE_FORMULA-bottle"
           mkdir -p "$bottle_dir"
           cd "$bottle_dir"
+          # Check Homebrew's install hooks before building the expensive dependencies.
+          HOMEBREW_DEVELOPER=1 brew install --verbose ca-certificates
           if brew list --versions "$BOTTLE_FORMULA" >/dev/null; then
             brew uninstall --force --ignore-dependencies "$BOTTLE_FORMULA"
           fi
