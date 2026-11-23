@@ -16,7 +16,7 @@ runs:
     - id: setup
       shell: bash
       env:
-        BREW_TAG: 7.0.15
+        BREW_TAG: 7.0.16
         CORE_REVISION: 5fe576b7ca6f8d53ec86e76660dfd0a502dfbc19
       run: |
         set -euo pipefail
