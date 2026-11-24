@@ -53,96 +53,77 @@ jobs:
     needs: check-cache
     if: needs.check-cache.outputs.build == 'true'
     runs-on: macos-26-intel
-    timeout-minutes: 350
+    timeout-minutes: 360
     env:
-      BOTTLE_FORMULA: llvm
+      STAGE_FORMULA: llvm
     steps:
       - *checkout
       - &setup
         name: Set up pinned Homebrew
         id: homebrew
         uses: ./.github/actions/setup-intel-homebrew
-      - &restore_bottle
-        name: Restore the stage's bottle
-        id: bottle
+      - &restore_stage
+        name: Restore this stage's installation
+        id: stage
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-${{ env.BOTTLE_FORMULA }}
-          path: ${{ runner.temp }}/${{ env.BOTTLE_FORMULA }}-bottle
-      - &build_bottle
-        name: Build a local bottle
-        if: steps.bottle.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bottle_dir="$RUNNER_TEMP/$BOTTLE_FORMULA-bottle"
-          mkdir -p "$bottle_dir"
-          cd "$bottle_dir"
-          # Check Homebrew's install hooks before building the expensive dependencies.
-          HOMEBREW_DEVELOPER=1 brew install --verbose ca-certificates
-          if brew list --versions "$BOTTLE_FORMULA" >/dev/null; then
-            brew uninstall --force --ignore-dependencies "$BOTTLE_FORMULA"
-          fi
-          # Bottle mode requires bottles for any dependencies that are still missing.
-          brew install --only-dependencies --build-from-source "$BOTTLE_FORMULA"
-          brew install --build-bottle "$BOTTLE_FORMULA"
-          brew bottle --skip-relocation --no-rebuild "$BOTTLE_FORMULA"
-          compgen -G './*.bottle.tar.gz' >/dev/null
-      - &save_bottle
-        name: Save the stage's bottle
-        if: steps.bottle.outputs.cache-hit != 'true'
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+      - name: Check Homebrew post-install hooks
+        if: steps.stage.outputs.cache-hit != 'true'
+        run: HOMEBREW_DEVELOPER=1 brew install --verbose ca-certificates
+      - &install_stage
+        name: Install the stage formula from source
+        if: steps.stage.outputs.cache-hit != 'true'
+        # Homebrew bottle builds add PGO for LLVM and LTO for Rust and Node.js.
+        run: brew install --build-from-source "$STAGE_FORMULA"
+      - &save_stage
+        name: Save this stage's installation
+        if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-${{ env.BOTTLE_FORMULA }}
-          path: ${{ runner.temp }}/${{ env.BOTTLE_FORMULA }}-bottle
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
 
   rust:
     needs: llvm
     runs-on: macos-26-intel
-    timeout-minutes: 350
+    timeout-minutes: 360
     env:
-      BOTTLE_FORMULA: rust
+      STAGE_FORMULA: rust
     steps:
       - *checkout
       - *setup
-      - *restore_bottle
-      - &restore_llvm
-        name: Restore the LLVM bottle
+      - *restore_stage
+      - name: Restore the LLVM installation
+        if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-llvm
-          path: ${{ runner.temp }}/llvm-bottle
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-llvm
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
           fail-on-cache-miss: true
-      - &install_llvm
-        name: Install the LLVM bottle
-        run: brew install "$RUNNER_TEMP"/llvm-bottle/*.bottle.tar.gz
-      - *build_bottle
-      - *save_bottle
+      - *install_stage
+      - *save_stage
 
   node:
     needs: rust
     runs-on: macos-26-intel
-    timeout-minutes: 350
+    timeout-minutes: 360
     env:
-      BOTTLE_FORMULA: node
+      STAGE_FORMULA: node
     steps:
       - *checkout
       - *setup
-      - *restore_bottle
-      - *restore_llvm
-      - &restore_rust
-        name: Restore the Rust bottle
+      - *restore_stage
+      - name: Restore the Rust installation
+        if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-rust
-          path: ${{ runner.temp }}/rust-bottle
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-rust
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
           fail-on-cache-miss: true
-      - *install_llvm
-      - &install_rust
-        name: Install the Rust bottle
-        run: brew install "$RUNNER_TEMP"/rust-bottle/*.bottle.tar.gz
-      - *build_bottle
-      - *save_bottle
+      - *install_stage
+      - *save_stage
 
   save-dependencies:
     needs: node
@@ -151,19 +132,14 @@ jobs:
     steps:
       - *checkout
       - *setup
-      - *restore_llvm
-      - *restore_rust
-      - name: Restore the Node.js bottle
+      - name: Restore the Node.js installation
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: ${{ steps.homebrew.outputs.platform-key }}-bottle-node
-          path: ${{ runner.temp }}/node-bottle
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-node
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
           fail-on-cache-miss: true
-      - *install_llvm
-      - *install_rust
       - name: Install the complete build dependency set
         run: |
-          brew install "$RUNNER_TEMP"/node-bottle/*.bottle.tar.gz
           brew install --only-dependencies --build-from-source trancore/tap/figfig
           bash .github/actions/setup-intel-homebrew/check-dependencies.sh
       - name: Save the installed dependencies

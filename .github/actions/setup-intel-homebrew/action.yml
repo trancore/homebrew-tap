@@ -2,7 +2,7 @@ name: Set up Intel Homebrew
 description: Pin Homebrew and identify the cached build dependencies for figfig.
 outputs:
   platform-key:
-    description: Cache key prefix for bottles built on this Intel runner.
+    description: Cache key prefix for dependencies built on this Intel runner.
     value: ${{ steps.setup.outputs.platform-key }}
   dependencies-key:
     description: Cache key for the complete installed dependency set.
@@ -56,6 +56,6 @@ runs:
           printf 'dependencies-key=%s-deps-%s\n' "$platform_key" "$dependencies"
           # Keep the Homebrew checkout, taps, downloads, and GitHub workspace out of the cache.
           printf 'dependencies-paths<<PATHS\n'
-          printf '/usr/local/%s\n' Cellar opt bin sbin lib include share etc var/homebrew/linked
+          printf '/usr/local/%s\n' Cellar opt bin sbin lib include share etc Frameworks libexec var/homebrew/linked
           printf 'PATHS\n'
         } >> "$GITHUB_OUTPUT"
