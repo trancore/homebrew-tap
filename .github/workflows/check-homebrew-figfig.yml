@@ -90,6 +90,8 @@ jobs:
         id: dependencies
         if: steps.formula.outputs.present == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          TAR_OPTIONS: ${{ steps.homebrew.outputs.cache-tar-options }}
         with:
           key: ${{ steps.homebrew.outputs.dependencies-key }}
           path: ${{ steps.homebrew.outputs.dependencies-paths }}

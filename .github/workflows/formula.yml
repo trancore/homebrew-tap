@@ -45,6 +45,8 @@ jobs:
         id: dependencies
         if: steps.formula.outputs.present == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: &cache_env
+          TAR_OPTIONS: ${{ steps.homebrew.outputs.cache-tar-options }}
         with:
           key: ${{ steps.homebrew.outputs.dependencies-key }}
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -66,6 +68,7 @@ jobs:
         name: Restore this stage's installation
         id: stage
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -81,6 +84,7 @@ jobs:
         name: Save this stage's installation
         if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -98,6 +102,7 @@ jobs:
       - name: Restore the LLVM installation
         if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.platform-key }}-installed-llvm
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -118,6 +123,7 @@ jobs:
       - name: Restore the Rust installation
         if: steps.stage.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.platform-key }}-installed-rust
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -134,6 +140,7 @@ jobs:
       - *setup
       - name: Restore the Node.js installation
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.platform-key }}-installed-node
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
@@ -144,6 +151,7 @@ jobs:
           bash .github/actions/setup-intel-homebrew/check-dependencies.sh
       - name: Save the installed dependencies
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
         with:
           key: ${{ steps.homebrew.outputs.dependencies-key }}
           path: ${{ steps.homebrew.outputs.dependencies-paths }}
