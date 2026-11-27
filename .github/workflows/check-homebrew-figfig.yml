@@ -66,9 +66,17 @@ jobs:
       - &check_uninstall
         name: Check uninstallation
         if: always() && steps.formula.outputs.present == 'true'
+        shell: bash
+        env:
+          RUNNER_ARCH: ${{ runner.arch }}
         run: |
           if brew list --formula figfig >/dev/null 2>&1; then
-            brew uninstall --force trancore/tap/figfig
+            uninstall_args=(--force)
+            if [[ "$RUNNER_ARCH" == X64 ]]; then
+              # The pinned Intel tap can recurse through migrations of unrelated runner packages.
+              uninstall_args+=(--ignore-dependencies)
+            fi
+            brew uninstall "${uninstall_args[@]}" trancore/tap/figfig
             ! brew list --versions figfig >/dev/null 2>&1
           fi
 
