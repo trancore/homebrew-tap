@@ -1,57 +1,157 @@
-name: Formula
+name: Prepare Intel Homebrew dependencies
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 1,4"
   push:
     branches: [main]
-  pull_request:
-  workflow_dispatch:
+    paths:
+      - "Formula/**"
+      - ".github/actions/setup-intel-homebrew/**"
+      - ".github/workflows/formula.yml"
 permissions:
   contents: read
 concurrency:
-  group: formula-${{ github.ref }}
-  cancel-in-progress: true
+  group: prepare-intel-homebrew-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_INSTALL_FROM_API: "1"
+  HOMEBREW_NO_ASK: "1"
 jobs:
-  verify:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  check-cache:
+    runs-on: macos-26-intel
+    timeout-minutes: 25
+    outputs:
+      build: ${{ steps.formula.outputs.present == 'true' && steps.dependencies.outputs.cache-hit != 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - &checkout
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Check for a published formula
         id: formula
         run: |
-          if [ -f Formula/figfig.rb ]; then
+          if [[ -f Formula/figfig.rb ]]; then
             ruby -c Formula/figfig.rb
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::No published release yet. Add the verified release's Formula/figfig.rb to enable installation checks."
+            echo 'present=true' >> "$GITHUB_OUTPUT"
           fi
-      - uses: Homebrew/actions/setup-homebrew@main
+      - name: Set up pinned Homebrew
+        id: homebrew
         if: steps.formula.outputs.present == 'true'
-      - name: Register this checkout as the tap
+        uses: ./.github/actions/setup-intel-homebrew
+      - name: Refresh the dependency cache if present
+        id: dependencies
         if: steps.formula.outputs.present == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: &cache_env
+          TAR_OPTIONS: ${{ steps.homebrew.outputs.cache-tar-options }}
+        with:
+          key: ${{ steps.homebrew.outputs.dependencies-key }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+
+  llvm:
+    needs: check-cache
+    if: needs.check-cache.outputs.build == 'true'
+    runs-on: macos-26-intel
+    timeout-minutes: 360
+    env:
+      STAGE_FORMULA: llvm
+    steps:
+      - *checkout
+      - &setup
+        name: Set up pinned Homebrew
+        id: homebrew
+        uses: ./.github/actions/setup-intel-homebrew
+      - &restore_stage
+        name: Restore this stage's installation
+        id: stage
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+      - name: Check Homebrew post-install hooks
+        if: steps.stage.outputs.cache-hit != 'true'
+        run: HOMEBREW_DEVELOPER=1 brew install --verbose ca-certificates
+      - &install_stage
+        name: Install the stage formula from source
+        if: steps.stage.outputs.cache-hit != 'true'
+        # Homebrew bottle builds add PGO for LLVM and LTO for Rust and Node.js.
+        run: brew install --build-from-source "$STAGE_FORMULA"
+      - &save_stage
+        name: Save this stage's installation
+        if: steps.stage.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-${{ env.STAGE_FORMULA }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+
+  rust:
+    needs: llvm
+    runs-on: macos-26-intel
+    timeout-minutes: 360
+    env:
+      STAGE_FORMULA: rust
+    steps:
+      - *checkout
+      - *setup
+      - *restore_stage
+      - name: Restore the LLVM installation
+        if: steps.stage.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-llvm
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+          fail-on-cache-miss: true
+      - *install_stage
+      - *save_stage
+
+  node:
+    needs: rust
+    runs-on: macos-26-intel
+    timeout-minutes: 360
+    env:
+      STAGE_FORMULA: node
+    steps:
+      - *checkout
+      - *setup
+      - *restore_stage
+      - name: Restore the Rust installation
+        if: steps.stage.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-rust
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+          fail-on-cache-miss: true
+      - *install_stage
+      - *save_stage
+
+  save-dependencies:
+    needs: node
+    runs-on: macos-26-intel
+    timeout-minutes: 350
+    steps:
+      - *checkout
+      - *setup
+      - name: Restore the Node.js installation
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.platform-key }}-installed-node
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
+          fail-on-cache-miss: true
+      - name: Install the complete build dependency set
         run: |
-          brew tap --custom-remote trancore/tap "$GITHUB_WORKSPACE"
-          brew trust --formula trancore/tap/figfig
-      - name: Check formula style and metadata
-        if: steps.formula.outputs.present == 'true'
-        run: |
-          brew style trancore/tap/figfig
-          brew audit --strict trancore/tap/figfig
-      - name: Build and test the source release
-        if: steps.formula.outputs.present == 'true'
-        run: |
-          brew install --build-from-source trancore/tap/figfig
-          brew test trancore/tap/figfig
-      - name: Check uninstallation
-        if: always() && steps.formula.outputs.present == 'true'
-        run: |
-          if brew list --formula figfig >/dev/null 2>&1; then
-            brew uninstall --force trancore/tap/figfig
-          fi
+          brew install --only-dependencies --build-from-source trancore/tap/figfig
+          bash .github/actions/setup-intel-homebrew/check-dependencies.sh
+      - name: Save the installed dependencies
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env: *cache_env
+        with:
+          key: ${{ steps.homebrew.outputs.dependencies-key }}
+          path: ${{ steps.homebrew.outputs.dependencies-paths }}
